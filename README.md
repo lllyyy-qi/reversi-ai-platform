@@ -75,7 +75,7 @@ npm run dev
 前端服务运行在 http://localhost:5173
 
 
-#### 使用说明
+### 使用说明
 访问 http://localhost:5173
 
 注册账号（邮箱 + 密码）
@@ -88,7 +88,7 @@ npm run dev
 
 AI观战：观看两个AI对弈
 
-#### AI 算法详解
+### AI 算法详解
 评估函数（17个参数）
 参数类型	数量	说明
 位置权重	10	棋盘各位置的重要性系数
@@ -105,7 +105,7 @@ Alpha-Beta 剪枝：减少无效搜索分支
 
 动态深度调整：根据剩余空格数自动调整搜索深度
 
-#### API 接口文档
+### API 接口文档
 端点	            方法	    说明
 /api/register	    POST	用户注册
 /api/login	        POST	用户登录
@@ -116,7 +116,7 @@ Alpha-Beta 剪枝：减少无效搜索分支
 /api/games	        GET	    获取历史对局
 /api/health 	    GET    	健康检查
 
-#### 配置说明
+### 配置说明
 修改AI参数
 在 backend/app/ai_engine.py 中修改 AI.__init__ 方法的默认参数：
 
@@ -127,14 +127,14 @@ self.mobility_weight = (20.89, 32.46, ...)      # 行动力权重
 self.search_params = (15, 6)                    # 搜索参数
 细节部分参考遗传算法工具页面（）
 
-#### 修改JWT密钥
+### 修改JWT密钥
 在 backend/app/auth.py 中修改：
 
 python
 SECRET_KEY = "your-secure-secret-key"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-#### 待开发功能
+### 待开发功能
 对局历史记录完整实现
 
 棋谱复盘功能
@@ -152,16 +152,16 @@ WebSocket实时对战
 对局分享功能
 
 
-#### 许可证
+### 许可证
 本项目采用 MIT 许可证 - 详见 LICENSE 文件
 
-#### 联系方式
+### 联系方式
 项目维护者：[]
 邮箱：[12312313@mail.edu.cn]
 
-#### 致谢
+### 致谢
 遗传算法参考了 DEAP 框架
 
 棋盘设计灵感来自 OrangeX4/Reversi
 
-#### 如果这个项目对你有帮助，欢迎点个 Star！
+### 如果这个项目对你有帮助，欢迎点个 Star！
