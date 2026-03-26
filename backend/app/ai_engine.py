@@ -1,3 +1,5 @@
+import sys
+
 import numpy as np
 import random
 import numba
@@ -11,8 +13,11 @@ COLOR_NONE = 0
 C_X_POINTS = [(0, 1), (1, 0), (1, 1), (0, 6), (1, 6), (1, 7),
               (6, 0), (6, 1), (7, 1), (6, 6), (6, 7), (7, 6)]
 
+def log(msg):
+    print(f"[AI] {msg}")
+    sys.stdout.flush()  
 
-# ===== 原有的AI类 =====
+# ===== AI类 =====
 class AI(object):
     def __init__(self, chessboard_size=8, color=COLOR_NONE, time_out=3.0):
         self.chessboard_size = chessboard_size
@@ -30,7 +35,7 @@ class AI(object):
         # 前沿子权重(前中期各1个)
         self.frontier_weight = (35.84674738800028, 25.62800134444401)
         # 搜索参数 (UTILITY_THRESHOLD, MAX_DEPTH)
-        self.search_params = (15, 6)
+        self.search_params = (10, 6)
 
         # 棋盘权重矩阵:
         # [v[9], v[8], v[6], v[3], v[3], v[6], v[8], v[9]]
@@ -59,7 +64,7 @@ class AI(object):
         self.chessboard = None
 
     def set_params(self, params: dict):
-        """从外部设置AI参数"""
+        log(f"设置AI参数: {list(params.keys())}")
         if 'weight_vector' in params:
             self.weight_vector = params['weight_vector']
             self.chessboard_weight = assign_weight_array(self.weight_vector, self.chessboard_size)
@@ -71,6 +76,7 @@ class AI(object):
             self.frontier_weight = params['frontier_weight']
         if 'search_params' in params:
             self.search_params = params['search_params']
+        log(f"参数设置完成")
 
     def to_list(self):
         """将参数转化为列表，用于遗传算法"""
@@ -91,69 +97,89 @@ class AI(object):
         self.chessboard_weight = assign_weight_array(self.weight_vector, self.chessboard_size)
 
     def get_move(self, board: np.ndarray, player: int = None) -> Tuple[Optional[tuple], List[tuple]]:
-        """获取AI的移动决策"""
+        log(f"get_move被调用: player={player}, board形状={board.shape}")
+        
         if player is not None:
             self.color = player
+            log(f"设置颜色为: {self.color} ({'黑棋' if self.color == -1 else '白棋'})")
 
         self.chessboard = np.array(board, dtype=int)
         self.candidate_list = []
+        
+        log(f"开始调用go()...")
+        start_time = time.time()
         self.go(self.chessboard)
+        elapsed = time.time() - start_time
+        log(f"go()执行完成，耗时: {elapsed:.3f}秒，candidate_list长度: {len(self.candidate_list)}")
 
         if len(self.candidate_list) > 0:
-            best_move = self.candidate_list[-1] if len(self.candidate_list) > 1 else None
+            best_move = self.candidate_list[-1]
+            log(f"返回最佳移动: {best_move}, 所有候选数: {len(self.candidate_list)}")
             return best_move, self.candidate_list
+        
+        log(f"警告: candidate_list为空!")
         return None, []
 
     def go(self, chessboard):
-        """主要决策函数 - 强制避免角落"""
+        """主要决策函数"""
+        log(f"go()开始执行，time_out={self.time_out}")
         self.candidate_list.clear()
         self.chessboard = chessboard
 
-        # 时间管理
         start_time = time.time()
-        deadline = start_time + min(max(self.time_out - 0.05, 0.5), 4.5)
+        # 增加可用时间，给AI足够的思考时间
+        available_time = max(self.time_out - 0.1, 1.0)
+        deadline = start_time + available_time
+        log(f"设置截止时间: {deadline}, 当前时间: {start_time}, 可用时间: {available_time}")
 
         # 获取所有合法移动
         all_possible_actions = generate_actions_filter(chessboard, self.color)
+        log(f"所有合法移动数: {len(all_possible_actions)}")
+        
+        if len(all_possible_actions) == 0:
+            log("没有合法移动")
+            return []
 
-        # 首先排除角落移动（除非没有其他选择）
+        # 排除角落移动
         non_corner_actions = [action for action in all_possible_actions if action not in self.corners]
+        log(f"非角落移动数: {len(non_corner_actions)}")
 
-        if non_corner_actions:
-            # 有非角落移动可用，优先使用这些
-            possible_actions = non_corner_actions
-            forced_corner = False
-        else:
-            # 只有角落移动可用，被迫使用
-            possible_actions = all_possible_actions
-            forced_corner = True
-
-        # 必须返回所有合法移动（包括角落）
+        # 返回所有合法移动
         for action in all_possible_actions:
             self.candidate_list.append(tuple(action))
 
-        if not all_possible_actions:
-            return []
+        # 特殊处理：如果只有一个合法移动，直接返回
+        if len(all_possible_actions) == 1:
+            log("只有一个合法移动，直接返回")
+            self.candidate_list.append(tuple(all_possible_actions[0]))
+            return self.candidate_list
 
-        # 迭代深化搜索
+        # 根据空格数决定搜索策略
         UTILITY_THRESHOLD, MAX_DEPTH = self.search_params
         blank_points = np.sum(chessboard == COLOR_NONE)
+        log(f"搜索参数: UTILITY_THRESHOLD={UTILITY_THRESHOLD}, MAX_DEPTH={MAX_DEPTH}")
+        log(f"空格数: {blank_points}")
 
+        # 优先使用非角落移动
+        possible_actions = non_corner_actions if non_corner_actions else all_possible_actions
+        forced_corner = (len(non_corner_actions) == 0)
+        
         best_move = possible_actions[0]
+        log(f"初始最佳移动: {best_move}")
 
-        if blank_points <= UTILITY_THRESHOLD:
-            # 终局完全搜索
-            best_move = self.terminal_search(possible_actions, blank_points)
-        else:
-            # 迭代深化搜索
-            best_move = self.iterative_deepening_search(possible_actions, MAX_DEPTH, deadline)
+        log("进入迭代深化搜索模式")
+        # 动态调整搜索深度，避免超时
+        max_depth = min(MAX_DEPTH, max(2, blank_points // 10))
+        log(f"调整后搜索深度: {max_depth}")
+        best_move = self.iterative_deepening_search(possible_actions, max_depth, deadline)
 
-        # 最终决策：如果最佳移动是角落且不是被迫的，重新选择
+        log(f"搜索完成，最佳移动: {best_move}")
+
+        # 角落处理
         final_move = best_move
         if best_move in self.corners and not forced_corner:
-            # 在非角落移动中选择次佳的
+            log(f"最佳移动是角落但不是被迫的，重新选择")
             if len(possible_actions) > 1:
-                # 重新评估，排除角落
                 non_corner_values = []
                 for action in possible_actions:
                     if action not in self.corners:
@@ -165,37 +191,51 @@ class AI(object):
                 if non_corner_values:
                     non_corner_values.sort(reverse=True)
                     final_move = non_corner_values[0][1]
+                    log(f"重新选择后的移动: {final_move}")
 
         self.candidate_list.append(tuple(final_move))
+        log(f"go()完成，最终candidate_list长度: {len(self.candidate_list)}")
         return self.candidate_list
 
     def iterative_deepening_search(self, possible_actions, max_depth, deadline):
         """迭代深化搜索"""
+        log(f"迭代深化搜索开始，max_depth={max_depth}")
         best_move = possible_actions[0]
         best_value = -self.INF
 
-        # 移动排序：角落优先（但会在后续避免）
         sorted_actions = self._sort_moves(possible_actions)
+        log(f"移动排序完成，前3个: {sorted_actions[:3]}")
 
         try:
             for depth in range(2, max_depth + 1):
-                if time.time() > deadline:
+                # 检查时间
+                current_time = time.time()
+                if current_time >= deadline:
+                    log(f"深度{depth} 开始前已超时，停止")
                     break
-
+                
+                # 为当前深度分配时间（最多剩余时间的80%）
+                remaining_time = deadline - current_time
+                depth_deadline = current_time + min(remaining_time * 0.8, 0.5)
+                log(f"搜索深度: {depth}, 剩余时间: {remaining_time:.3f}, 深度截止: {depth_deadline}")
+                
                 current_best_move = None
                 current_best_value = -self.INF
                 alpha = -self.INF
 
-                for action in sorted_actions:
-                    if time.time() > deadline:
+                for idx, action in enumerate(sorted_actions):
+                    if time.time() >= depth_deadline:
+                        log(f"深度{depth} 搜索超时，停止")
                         break
 
-                    # 使用可逆操作
+                    if idx % 5 == 0:
+                        log(f"深度{depth} 已搜索 {idx+1}/{len(sorted_actions)} 个移动")
+
                     update_array = update_chessboard(self.chessboard, action, self.color)
-                    value = self._min_value(-self.color, depth - 1, alpha, self.INF, deadline)
+                    value = self._min_value(-self.color, depth - 1, alpha, self.INF, depth_deadline)
                     revert_chessboard(self.chessboard, action, self.color, update_array)
 
-                    if value is None:  # 超时，使用之前的最佳值
+                    if value is None:
                         continue
 
                     if value > current_best_value:
@@ -204,60 +244,59 @@ class AI(object):
 
                     alpha = max(alpha, current_best_value)
 
-                # 只有当这一层有有效结果时才更新最佳移动
                 if current_best_move is not None:
                     best_move = current_best_move
                     best_value = current_best_value
+                    log(f"深度{depth}完成，最佳移动: {best_move}, 最佳值: {best_value}")
+                else:
+                    log(f"深度{depth}没有找到有效移动，使用之前的best_move: {best_move}")
+                    break
 
-        except Exception:
-            pass
+        except Exception as e:
+            log(f"迭代深化搜索异常: {e}")
+            import traceback
+            traceback.print_exc()
 
+        log(f"迭代深化搜索完成，返回: {best_move}")
         return best_move
 
-    def terminal_search(self, possible_actions, blank_points):
-        """终局完全搜索 - 使用简化评估"""
-        best_move = possible_actions[0]
-        best_value = -self.INF
+    # def terminal_search(self, possible_actions, blank_points):
+    #     """终局完全搜索 - 使用简化评估"""
+    #     best_move = possible_actions[0]
+    #     best_value = -self.INF
 
-        for action in possible_actions:
-            update_array = update_chessboard(self.chessboard, action, self.color)
-            value = self._min_value_terminal(-self.color, blank_points - 1)
-            revert_chessboard(self.chessboard, action, self.color, update_array)
+    #     for action in possible_actions:
+    #         update_array = update_chessboard(self.chessboard, action, self.color)
+    #         value = self._min_value_terminal(-self.color, blank_points - 1)
+    #         revert_chessboard(self.chessboard, action, self.color, update_array)
 
-            if value > best_value:
-                best_value = value
-                best_move = action
-
-        return best_move
+    #         if value > best_value:
+    #             best_value = value
+    #             best_move = action
+    #     return best_move
 
     def _max_value(self, player, depth, alpha, beta, deadline):
-        """Max节点搜索 - 优化移动生成"""
-        if time.time() > deadline:
+        """Max节点搜索 - 使用传入的deadline"""
+        if time.time() >= deadline:
             return None
 
         if depth == 0:
             return self._eval()
 
-        # 直接使用优化函数生成合法移动
         possible_actions = generate_actions_filter(self.chessboard, player)
 
         if not possible_actions:
-            # 如果没有合法移动，检查游戏是否结束
             if not generate_actions_filter(self.chessboard, -player):
-                return self._eval_terminal()  # 游戏结束
-            return self._min_value(-player, depth, alpha, beta, deadline)  # 对手继续
+                return self._eval_terminal()
+            return self._min_value(-player, depth, alpha, beta, deadline)
 
         value = -self.INF
-
-        # 在搜索中也避免角落
         non_corner_actions = [action for action in possible_actions if action not in self.corners]
         actions_to_search = non_corner_actions if non_corner_actions else possible_actions
-
-        # 移动排序
         sorted_actions = self._sort_moves(actions_to_search)
 
         for action in sorted_actions:
-            if time.time() > deadline:
+            if time.time() >= deadline:
                 return None
 
             update_array = update_chessboard(self.chessboard, action, player)
@@ -265,7 +304,7 @@ class AI(object):
             revert_chessboard(self.chessboard, action, player, update_array)
 
             if child_value is None:
-                continue  # 超时，继续下一个移动而不是直接返回
+                continue
 
             value = max(value, child_value)
             alpha = max(alpha, value)
@@ -275,33 +314,27 @@ class AI(object):
         return value if value != -self.INF else None
 
     def _min_value(self, player, depth, alpha, beta, deadline):
-        """Min节点搜索 - 优化移动生成"""
-        if time.time() > deadline:
+        """Min节点搜索 - 使用传入的deadline"""
+        if time.time() >= deadline:
             return None
 
         if depth == 0:
             return self._eval()
 
-        # 直接使用优化函数生成合法移动
         possible_actions = generate_actions_filter(self.chessboard, player)
 
         if not possible_actions:
-            # 如果没有合法移动，检查游戏是否结束
             if not generate_actions_filter(self.chessboard, -player):
-                return self._eval_terminal()  # 游戏结束
-            return self._max_value(-player, depth, alpha, beta, deadline)  # 对手继续
+                return self._eval_terminal()
+            return self._max_value(-player, depth, alpha, beta, deadline)
 
         value = self.INF
-
-        # 在搜索中也避免角落
         non_corner_actions = [action for action in possible_actions if action not in self.corners]
         actions_to_search = non_corner_actions if non_corner_actions else possible_actions
-
-        # 移动排序
         sorted_actions = self._sort_moves(actions_to_search)
 
         for action in sorted_actions:
-            if time.time() > deadline:
+            if time.time() >= deadline:
                 return None
 
             update_array = update_chessboard(self.chessboard, action, player)
@@ -309,7 +342,7 @@ class AI(object):
             revert_chessboard(self.chessboard, action, player, update_array)
 
             if child_value is None:
-                continue  # 超时，继续下一个移动
+                continue
 
             value = min(value, child_value)
             beta = min(beta, value)
@@ -318,51 +351,51 @@ class AI(object):
 
         return value if value != self.INF else None
 
-    def _min_value_terminal(self, player, remaining_depth):
-        """终局搜索的Min节点 """
-        if remaining_depth == 0:
-            return self._eval_terminal()
+    # def _min_value_terminal(self, player, remaining_depth):
+    #     """终局搜索的Min节点 """
+    #     if remaining_depth == 0:
+    #         return self._eval_terminal()
 
-        value = self.INF
-        has_valid_move = False
+    #     value = self.INF
+    #     has_valid_move = False
 
-        possible_actions = generate_actions_filter(self.chessboard, player)
+    #     possible_actions = generate_actions_filter(self.chessboard, player)
 
-        if not possible_actions:
-            if not generate_actions_filter(self.chessboard, -player):
-                return self._eval_terminal()
-            return self._max_value_terminal(-player, remaining_depth)
+    #     if not possible_actions:
+    #         if not generate_actions_filter(self.chessboard, -player):
+    #             return self._eval_terminal()
+    #         return self._max_value_terminal(-player, remaining_depth)
 
-        for action in possible_actions:
-            has_valid_move = True
-            update_array = update_chessboard(self.chessboard, action, player)
-            child_value = self._max_value_terminal(-player, remaining_depth - 1)
-            revert_chessboard(self.chessboard, action, player, update_array)
-            value = min(value, child_value)
+    #     for action in possible_actions:
+    #         has_valid_move = True
+    #         update_array = update_chessboard(self.chessboard, action, player)
+    #         child_value = self._max_value_terminal(-player, remaining_depth - 1)
+    #         revert_chessboard(self.chessboard, action, player, update_array)
+    #         value = min(value, child_value)
 
-        return value
+    #     return value
 
-    def _max_value_terminal(self, player, remaining_depth):
-        """终局搜索的Max节点 """
-        if remaining_depth == 0:
-            return self._eval_terminal()
+    # def _max_value_terminal(self, player, remaining_depth):
+    #     """终局搜索的Max节点 """
+    #     if remaining_depth == 0:
+    #         return self._eval_terminal()
 
-        value = -self.INF
-        has_valid_move = False
+    #     value = -self.INF
+    #     has_valid_move = False
 
-        possible_actions = generate_actions_filter(self.chessboard, player)
+    #     possible_actions = generate_actions_filter(self.chessboard, player)
 
-        if not possible_actions:
-            if not generate_actions_filter(self.chessboard, -player):
-                return self._eval_terminal()
-            return self._min_value_terminal(-player, remaining_depth)
+    #     if not possible_actions:
+    #         if not generate_actions_filter(self.chessboard, -player):
+    #             return self._eval_terminal()
+    #         return self._min_value_terminal(-player, remaining_depth)
 
-        for action in possible_actions:
-            has_valid_move = True
-            update_array = update_chessboard(self.chessboard, action, player)
-            child_value = self._min_value_terminal(-player, remaining_depth - 1)
-            revert_chessboard(self.chessboard, action, player, update_array)
-            value = max(value, child_value)
+    #     for action in possible_actions:
+    #         has_valid_move = True
+    #         update_array = update_chessboard(self.chessboard, action, player)
+    #         child_value = self._min_value_terminal(-player, remaining_depth - 1)
+    #         revert_chessboard(self.chessboard, action, player, update_array)
+    #         value = max(value, child_value)
 
         return value
 
@@ -586,15 +619,29 @@ def evaluate_chessboard(chessboard, color, stability_weight, mobility_weight, fr
 class AIService:
     def __init__(self):
         self.ai_instances = {}
-        self._lock = asyncio.Lock()  # 添加锁
+        self._lock = asyncio.Lock()
+        self.default_params = {
+            'weight_vector': [10.49359640524536, 6.074361821653552, 23.23132876440326, 
+                             20.868211117335303, 9.069621066840796, 44.692108180301766, 
+                             29.28046185627584, 15.448222357571511, -31.312624292985586, 
+                             25.819962143728134],
+            'stability_weight': 112.40179879351612,
+            'mobility_weight': (20.89397854731418, 32.46275224220238, 
+                               30.92215133159721, 48.41880892378325),
+            'frontier_weight': (35.84674738800028, 25.62800134444401),
+            'search_params': (15, 6)
+        }
 
     def create_ai(self, ai_id: str, params: dict = None) -> AI:
         """创建新的AI实例"""
         ai = AI(chessboard_size=8, color=COLOR_NONE, time_out=2.0)
         if params:
             ai.set_params(params)
+        else:
+            ai.set_params(self.default_params)
         self.ai_instances[ai_id] = ai
         return ai
+
 
     def get_ai(self, ai_id: str) -> AI:
         """获取AI实例，如果不存在则创建"""

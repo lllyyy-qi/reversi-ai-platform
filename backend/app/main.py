@@ -41,6 +41,7 @@ class MoveResponse(BaseModel):
     candidate_moves: List[List[int]]  # 下一玩家的合法移动
     game_over: bool = False
     winner: Optional[int] = None
+    ai_candidates: Optional[List[List[int]]] = None  # AI 候选移动列表
 
 class UserResponse(BaseModel):
     id: int
@@ -91,91 +92,104 @@ async def get_legal_moves(data: dict):
 
 @app.post("/api/move", response_model=MoveResponse)
 async def move(request: MoveRequest):
+    import time
+    request_time = time.time()
+    print(f"\n{'='*50}")
+    print(f"[API] /move 被调用 at {time.strftime('%H:%M:%S')}")
+    print(f"[API] 请求参数: player={request.player}, user_move={request.move}")
+    
     board = np.array(request.board)
     player = request.player
     user_move = request.move
-
+    
+    # 打印棋盘状态
+    black_count = np.sum(board == COLOR_BLACK)
+    white_count = np.sum(board == COLOR_WHITE)
+    empty_count = np.sum(board == COLOR_NONE)
+    print(f"[API] 当前棋盘: 黑={black_count}, 白={white_count}, 空={empty_count}")
+    
     try:
         # 如果提供了 user_move，则应用玩家移动
         if user_move is not None:
+            print(f"[API] 处理玩家移动: {user_move}")
             r, c = user_move
             # 验证合法性
             legal_moves = generate_actions_filter(board, player)
+            print(f"[API] 当前合法移动: {legal_moves}")
+            
             if (r, c) not in legal_moves:
+                print(f"[API] 错误: 非法移动 {user_move}")
                 raise HTTPException(status_code=400, detail="Illegal move")
+            
             # 应用移动
             update_chessboard(board, (r, c), player)
             move_made = user_move
-            print(f"玩家移动: ({r}, {c})")
+            print(f"[API] 玩家移动应用成功")
+            
         else:
             # AI 选择移动
-            ai = ai_service.create_ai("default")
-
-            # 先获取当前玩家的合法移动
+            print(f"[API] AI决策开始 - 玩家: {player} ({'黑棋' if player == -1 else '白棋'})")
+            ai = ai_service.get_ai("default")
+            print(f"[API] 获取AI实例成功")
+            
+            # 获取当前玩家的合法移动
             current_legal = generate_actions_filter(board, player)
-            print(f"AI决策前 - 玩家: {player}, 合法移动数: {len(current_legal)}")
-
+            print(f"[API] 当前合法移动数: {len(current_legal)}")
+            if len(current_legal) > 0:
+                print(f"[API] 合法移动示例: {current_legal[:5]}")
+            
             if len(current_legal) == 0:
-                # 当前玩家没有合法移动
-                print("当前玩家没有合法移动，跳过")
+                print(f"[API] 当前玩家没有合法移动")
                 move_made = None
             else:
-                # 在线程池中运行AI决策
                 try:
-                    future = executor.submit(run_ai_decision, ai, board.copy(), player)
-                    result = await asyncio.get_event_loop().run_in_executor(
-                        None, lambda: future.result(timeout=3)
-                    )
-
-                    if result is None:
-                        print("AI决策返回None")
-                        # 如果AI返回None，使用第一个合法移动
-                        if len(current_legal) > 0:
-                            result = current_legal[0]
-                            print(f"使用默认移动: {result}")
-
-                    if result is not None:
-                        move_made = result
+                    print(f"[API] 调用AI.get_move()...")
+                    start_ai = time.time()
+                    best_move, all_moves = ai.get_move(board.copy(), player)
+                    ai_time = time.time() - start_ai
+                    print(f"[API] AI.get_move() 完成，耗时: {ai_time:.3f}秒")
+                    print(f"[API] AI返回: best_move={best_move}, 候选数={len(all_moves)}")
+                    
+                    if best_move is not None:
+                        move_made = best_move
                         r, c = move_made
                         update_chessboard(board, (r, c), player)
-                        print(f"AI移动: ({r}, {c})")
+                        print(f"[API] AI移动: ({r}, {c})")
                     else:
-                        move_made = None
-
-                except concurrent.futures.TimeoutError:
-                    print("AI决策超时")
-                    future.cancel()
-                    # 超时后使用第一个合法移动
+                        print(f"[API] AI返回None，使用第一个合法移动")
+                        move_made = current_legal[0]
+                        r, c = move_made
+                        update_chessboard(board, (r, c), player)
+                        
+                except Exception as e:
+                    print(f"[API] AI执行出错: {e}")
+                    import traceback
+                    traceback.print_exc()
                     if len(current_legal) > 0:
                         move_made = current_legal[0]
                         r, c = move_made
                         update_chessboard(board, (r, c), player)
-                        print(f"超时使用默认移动: ({r}, {c})")
                     else:
                         move_made = None
-                except Exception as e:
-                    print(f"AI执行出错: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    move_made = None
 
         # 切换玩家
         next_player = -player
         # 获取下一玩家的合法移动
         legal_moves_next = generate_actions_filter(board, next_player)
-        print(f"下一玩家: {next_player}, 合法移动数: {len(legal_moves_next)}")
-
+        print(f"[API] 下一玩家: {next_player} ({'黑棋' if next_player == -1 else '白棋'}), 合法移动数: {len(legal_moves_next)}")
+        
         game_over = False
         winner = None
 
         # 检查游戏是否结束
         if len(legal_moves_next) == 0:
             # 检查对方是否也无棋
-            if len(generate_actions_filter(board, -next_player)) == 0:
+            opponent_moves = generate_actions_filter(board, -next_player)
+            if len(opponent_moves) == 0:
                 game_over = True
                 black_count = np.sum(board == COLOR_BLACK)
                 white_count = np.sum(board == COLOR_WHITE)
-                print(f"游戏结束 - 黑:{black_count}, 白:{white_count}")
+                print(f"[API] 游戏结束 - 黑:{black_count}, 白:{white_count}")
                 # 反向黑白棋：棋子少的一方赢
                 if black_count < white_count:
                     winner = COLOR_BLACK
@@ -183,7 +197,12 @@ async def move(request: MoveRequest):
                     winner = COLOR_WHITE
                 else:
                     winner = 0
+                print(f"[API] 胜者: {winner} ({'黑棋' if winner == -1 else '白棋' if winner == 1 else '平局'})")
 
+        total_time = time.time() - request_time
+        print(f"[API] 请求处理完成，总耗时: {total_time:.3f}秒")
+        print(f"{'='*50}\n")
+        
         return MoveResponse(
             board=board.tolist(),
             move=[int(move_made[0]), int(move_made[1])] if move_made is not None else None,
@@ -191,8 +210,9 @@ async def move(request: MoveRequest):
             game_over=game_over,
             winner=winner
         )
+        
     except Exception as e:
-        print(f"move端点异常: {e}")
+        print(f"[API] 异常: {e}")
         import traceback
         traceback.print_exc()
         legal_moves_next = generate_actions_filter(board, -player)

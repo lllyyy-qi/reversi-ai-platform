@@ -36,13 +36,14 @@
 </template>
 
 <script setup>
-import { computed, watch, onMounted, onUnmounted, ref } from 'vue'  // 添加 onUnmounted 导入
+import { computed, watch, onMounted, onUnmounted, ref } from 'vue'
 import { useGameStore } from '@/stores/game'
 import Board from '@/components/Board.vue'
 import GameControls from '@/components/GameControls.vue'
 
 const gameStore = useGameStore()
 const aiRunning = ref(false)
+const aiLoopInterval = ref(null)
 
 const winnerText = computed(() => {
   if (gameStore.winner === -1) return '黑方胜利！'
@@ -50,6 +51,29 @@ const winnerText = computed(() => {
   if (gameStore.winner === 0) return '平局！'
   return ''
 })
+
+// 处理新游戏
+async function handleNewGame() {
+  console.log('===== 开始新游戏 =====')
+  
+  // 停止AI循环
+  if (aiLoopInterval.value) {
+    clearTimeout(aiLoopInterval.value)
+    aiLoopInterval.value = null
+  }
+  aiRunning.value = false
+  
+  // 重置游戏状态
+  await gameStore.resetGame()
+  
+  // 如果当前是AI观战模式，自动启动AI对战
+  if (gameStore.gameMode === 'ai-vs-ai') {
+    console.log('AI观战模式，启动AI对战')
+    setTimeout(() => {
+      runAIVersusAI()
+    }, 500)
+  }
+}
 
 async function handleCellClick(row, col) {
   if (gameStore.gameMode === 'human' && !aiRunning.value) {
@@ -71,7 +95,14 @@ async function handlePass() {
     console.log('玩家点击跳过，当前玩家:', gameStore.currentPlayer === -1 ? '黑' : '白')
     await gameStore.pass()
     console.log('跳过后，当前玩家:', gameStore.currentPlayer === -1 ? '黑' : '白')
-   
+    
+    // 如果是人机模式且跳过后轮到AI，自动触发AI移动
+    if (gameStore.gameMode === 'human' && gameStore.currentPlayer === 1 && !gameStore.gameOver) {
+      console.log('跳过后轮到AI，自动触发AI移动')
+      aiRunning.value = true
+      await gameStore.makeAIMove()
+      aiRunning.value = false
+    }
   }
 }
 
@@ -82,53 +113,86 @@ function handleUndo() {
 }
 
 function handleModeChange(mode) {
+  // 停止当前AI循环
+  if (aiLoopInterval.value) {
+    clearTimeout(aiLoopInterval.value)
+    aiLoopInterval.value = null
+  }
   aiRunning.value = false
+  
+  // 切换模式
   gameStore.gameMode = mode
   gameStore.resetGame()
+  
+  // 如果是AI观战模式，启动AI对战
+  if (mode === 'ai-vs-ai') {
+    setTimeout(() => {
+      runAIVersusAI()
+    }, 500)
+  }
 }
 
-// AI 对战自动循环 - 使用标志位防止并发
+// AI 对战自动循环 - 使用递归而不是while循环，避免阻塞
 async function runAIVersusAI() {
+  // 检查是否应该继续
   if (aiRunning.value) return
+  if (gameStore.gameMode !== 'ai-vs-ai') return
+  if (gameStore.gameOver) return
+  
   aiRunning.value = true
+  console.log('AI对战开始')
   
-  const maxMoves = 60
-  let moveCount = 0
-  
-  while (aiRunning.value && !gameStore.gameOver && gameStore.gameMode === 'ai-vs-ai') {
-    if (moveCount >= maxMoves) {
-      console.log('达到最大步数，停止AI对战')
-      break
+  // 使用递归函数，每次移动后等待
+  const makeNextMove = async () => {
+    // 检查是否应该继续
+    if (gameStore.gameMode !== 'ai-vs-ai' || gameStore.gameOver || !aiRunning.value) {
+      console.log('AI对战结束')
+      aiRunning.value = false
+      return
     }
     
-    // 检查游戏状态
-    if (gameStore.gameOver) break
+    console.log('AI观战 - 当前玩家:', gameStore.currentPlayer === -1 ? '黑棋' : '白棋')
     
-    await new Promise(resolve => setTimeout(resolve, 800))
+    // 执行AI移动
+    const moveMade = await gameStore.makeAIMove()
     
-    // 再次检查，防止在等待期间状态改变
-    if (gameStore.gameOver || gameStore.gameMode !== 'ai-vs-ai') break
-    
-    await gameStore.makeAIMove()
-    moveCount++
+    // 等待一段时间再继续
+    if (!gameStore.gameOver && gameStore.gameMode === 'ai-vs-ai') {
+      aiLoopInterval.value = setTimeout(() => {
+        makeNextMove()
+      }, 500)
+    } else {
+      aiRunning.value = false
+    }
   }
   
-  aiRunning.value = false
+  // 开始第一次移动
+  makeNextMove()
 }
 
 // 监听模式变化
 watch(() => gameStore.gameMode, (newMode, oldMode) => {
   if (newMode === 'ai-vs-ai' && oldMode !== 'ai-vs-ai') {
     // 启动新循环
-    runAIVersusAI()
+    setTimeout(() => {
+      runAIVersusAI()
+    }, 500)
   } else if (newMode !== 'ai-vs-ai') {
     // 停止循环
+    if (aiLoopInterval.value) {
+      clearTimeout(aiLoopInterval.value)
+      aiLoopInterval.value = null
+    }
     aiRunning.value = false
   }
 })
 
 // 组件卸载时停止AI
 onUnmounted(() => {
+  if (aiLoopInterval.value) {
+    clearTimeout(aiLoopInterval.value)
+    aiLoopInterval.value = null
+  }
   aiRunning.value = false
 })
 
@@ -139,6 +203,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* 样式保持不变 */
 .game-view {
   min-height: 100vh;
   display: flex;

@@ -90,26 +90,15 @@ const makeMove = async (row, col) => {
   }
 }
 // AI 移动
-const makeAIMove = async (retryCount = 0) => {
+const makeAIMove = async () => {
   if (gameOver.value) return false
   
   console.log('AI正在思考...', currentPlayer.value === -1 ? '黑棋' : '白棋', 
-              '合法移动:', legalMoves.value.length)
+              '合法移动数:', legalMoves.value.length)
   
   const snapshot = saveSnapshot()
   try {
-    // 使用 AbortController 实现超时
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => {
-      controller.abort()
-      console.log('AI请求超时')
-    }, 8000)
-    
-    const response = await gameAPI.getAIMove(board.value, currentPlayer.value, {
-      signal: controller.signal
-    })
-    
-    clearTimeout(timeoutId)
+    const response = await gameAPI.getAIMove(board.value, currentPlayer.value)
     
     console.log('AI响应:', response.data)
     
@@ -122,7 +111,7 @@ const makeAIMove = async (retryCount = 0) => {
       gameOver.value = response.data.game_over
       winner.value = response.data.winner
       moveHistory.value.push(snapshot)
-      console.log('AI下棋完成，当前玩家:', currentPlayer.value, 
+      console.log('AI下棋完成，当前玩家:', currentPlayer.value === -1 ? '黑棋' : '白棋',
                   '合法移动数:', legalMoves.value.length)
       return true
     } else if (response.data.game_over) {
@@ -131,44 +120,31 @@ const makeAIMove = async (retryCount = 0) => {
       console.log('游戏结束，胜者:', winner.value)
       return false
     } else {
-      // AI说没有合法移动，但我们需要验证
-      console.log('AI报告没有合法移动，检查实际合法移动')
+      // AI没有合法移动，自动跳过
+      console.log('AI没有合法移动，自动跳过')
       
-      // 再次获取合法移动确认
-      const legalRes = await gameAPI.getLegalMoves(board.value, currentPlayer.value)
-      const actualLegalMoves = legalRes.data
+      // 保存跳过前的状态
+      moveHistory.value.push(snapshot)
       
-      if (actualLegalMoves.length > 0) {
-        // AI误报，让AI重新选择
-        console.log('AI误报，实际有合法移动，重试')
-        if (retryCount < 3) {
-          return makeAIMove(retryCount + 1)
-        } else {
-          // 重试次数过多，使用第一个合法移动
-          console.log('重试次数过多，使用第一个合法移动')
-          const forcedMove = actualLegalMoves[0]
-          return makePlayerMove(forcedMove[0], forcedMove[1])
-        }
-      } else {
-        // 确实没有合法移动，自动跳过
-        console.log('确实没有合法移动，跳过')
-        currentPlayer.value = -currentPlayer.value
-        // 获取新玩家的合法移动
-        const newLegalRes = await gameAPI.getLegalMoves(board.value, currentPlayer.value)
-        legalMoves.value = newLegalRes.data
-        return false
+      // 切换玩家
+      currentPlayer.value = -currentPlayer.value
+      legalMoves.value = response.data.candidate_moves
+      
+      // 检查新玩家是否有合法移动
+      if (legalMoves.value.length === 0) {
+        // 双方都无合法移动，游戏结束
+        const count = pieceCount()
+        if (count.black < count.white) winner.value = -1
+        else if (count.white < count.black) winner.value = 1
+        else winner.value = 0
+        gameOver.value = true
+        console.log('双方都无合法移动，游戏结束')
       }
+      
+      return false
     }
   } catch (error) {
     console.error('AI移动失败', error)
-    
-    // 重试逻辑
-    if (retryCount < 2 && !gameOver.value) {
-      console.log(`重试AI移动 (${retryCount + 1}/2)`)
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      return makeAIMove(retryCount + 1)
-    }
-    
     // 出错时恢复快照
     if (snapshot) {
       board.value = snapshot.board
@@ -269,21 +245,21 @@ const pass = async () => {
       // 记录历史
       moveHistory.value.push(snapshot)
       
-      // 重要：如果游戏模式是人机对战且跳过后轮到AI，则自动触发AI移动
-      if (gameMode.value === 'human' && currentPlayer.value === 1 && !gameOver.value) {
-        console.log('跳过后轮到AI，自动触发AI移动')
-        // 延迟一点触发AI移动，确保状态更新完成
-        setTimeout(() => {
-          if (!gameOver.value && currentPlayer.value === 1) {
-            makeAIMove()
-          }
-        }, 100)
-      }
+      return true
     } catch (error) {
       console.error('获取合法移动失败', error)
+      // 恢复快照
+      board.value = snapshot.board
+      currentPlayer.value = snapshot.player
+      lastMove.value = snapshot.lastMove
+      legalMoves.value = snapshot.legalMoves
+      gameOver.value = snapshot.gameOver
+      winner.value = snapshot.winner
+      return false
     }
   } else {
     console.log('当前有合法移动，不能跳过')
+    return false
   }
 }
   // 保存游戏（后续实现）

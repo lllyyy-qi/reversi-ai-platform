@@ -16,19 +16,24 @@ __pycache__/
 *.db
 *.sqlite
 *.sqlite3
+reversi.db
 
 # 前端依赖
 frontend/node_modules/
 frontend/dist/
+frontend/.vite/
 frontend/.env
 frontend/.env.local
 frontend/.env.*.local
+frontend/*.log
 
 # 打包文件
 *.egg-info/
 *.egg
 dist/
 build/
+backend/dist/
+backend/build/
 
 # IDE配置
 .vscode/
@@ -36,6 +41,8 @@ build/
 *.swp
 *.swo
 *~
+.DS_Store
+Thumbs.db
 
 # 日志文件
 *.log
@@ -44,28 +51,20 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# 操作系统文件
-.DS_Store
-Thumbs.db
-ehthumbs.db
-Desktop.ini
-
 # 环境变量文件
 .env
 .env.local
 .env.*.local
+backend/.env
+frontend/.env
 
 # 测试覆盖率
 htmlcov/
 .coverage
 .coverage.*
 .cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
 .pytest_cache/
+.tox/
 
 # Jupyter Notebook
 .ipynb_checkpoints
@@ -76,6 +75,8 @@ tmp/
 temp/
 *.tmp
 *.bak
-*.swp
-*.swo
-*~
+
+# 项目特定
+backend/app/__pycache__/
+backend/__pycache__/
+*.pid
