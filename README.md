@@ -26,12 +26,6 @@
 - **落子规则**：必须在至少夹住对方一个棋子的位置落子
 - **翻转规则**：被夹住的对方棋子全部翻转
 
-##  技术架构
-┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
-│ Vue 3 前端      │────▶│ FastAPI 后端     │────▶│    Python AI    │
-│ + Pinia         │◀────│ + SQLite         │◀────│     引擎        │
-└─────────────────┘      └─────────────────┘      └─────────────────┘
-
 ### 技术栈
 
 | 层级 | 技术 |
@@ -110,37 +104,6 @@ Alpha-Beta 剪枝：减少无效搜索分支
 移动排序：优先搜索高价值位置（角落惩罚、边缘奖励）
 
 动态深度调整：根据剩余空格数自动调整搜索深度
-
-#### 项目结构
-reversi-ai-platform/
-├── backend/                 # 后端服务
-│   ├── app/
-│   │   ├── main.py         # FastAPI 主应用
-│   │   ├── ai_engine.py    # AI 核心引擎
-│   │   ├── models.py       # 数据库模型
-│   │   ├── schemas.py      # Pydantic 模型
-│   │   ├── auth.py         # JWT 认证
-│   │   └── database.py     # 数据库配置
-│   ├── requirements.txt    # Python 依赖
-│   └── run.py              # 启动脚本
-│
-├── frontend/                # 前端应用
-│   ├── src/
-│   │   ├── components/     # Vue 组件
-│   │   │   ├── Board.vue   # 棋盘组件
-│   │   │   └── GameControls.vue  # 游戏控制
-│   │   ├── views/          # 页面视图
-│   │   │   ├── GameView.vue
-│   │   │   └── LoginView.vue
-│   │   ├── stores/         # Pinia 状态管理
-│   │   │   └── game.js
-│   │   ├── services/       # API 服务
-│   │   │   └── api.js
-│   │   └── router/         # 路由配置
-│   ├── package.json
-│   └── vite.config.js
-│
-└── venv/                   # Python 虚拟环境（忽略）
 
 #### API 接口文档
 端点	            方法	    说明
