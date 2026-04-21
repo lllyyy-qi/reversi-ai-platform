@@ -150,7 +150,7 @@ WebSocket实时对战
 
 ### 联系方式
 项目维护者：[lllyyy-qi]
-邮箱：[12312313@mail.edu.cn]
+邮箱：[12312313@mail.sustech.edu.cn]
 
 ### 致谢
 遗传算法参考了 DEAP 框架
